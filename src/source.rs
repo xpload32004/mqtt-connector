@@ -19,7 +19,6 @@ use fluvio_connector_common::{
 use crate::formatter::{self, Formatter};
 use crate::{config::MqttConfig, error::MqttConnectorError, event::MqttEvent};
 
-const CHANNEL_BUFFER_SIZE: usize = 10000;
 const MQTT_CLIENT_BUFFER_SIZE: usize = 10;
 const MIN_LOG_WARN_TIME: Duration = Duration::from_secs(5 * 60);
 
@@ -28,6 +27,7 @@ pub(crate) struct MqttSource {
     options: MqttOptions,
     topic: String,
     qos: QoS,
+    channel_capacity: usize,
 }
 
 impl MqttSource {
@@ -52,6 +52,8 @@ impl MqttSource {
         }
         let mut options = MqttOptions::try_from(url.clone())?;
         options.set_keep_alive(config.timeout);
+        // limit broker→client pressure
+        options.set_inflight(config.inflight);
         if url.scheme() == "mqtts" || url.scheme() == "ssl" {
             info!("using tls");
             let mut root_cert_store = rustls::RootCertStore::empty();
@@ -68,12 +70,17 @@ impl MqttSource {
         }
         let formatter = formatter::from_output_type(&config.payload_output_type);
         let topic = config.topic.clone();
-        let qos = QoS::AtMostOnce;
+        let qos = match config.qos {
+            crate::config::QosConfig::AtMostOnce => QoS::AtMostOnce,
+            crate::config::QosConfig::AtLeastOnce => QoS::AtLeastOnce,
+            crate::config::QosConfig::ExactlyOnce => QoS::ExactlyOnce,
+        };
         Ok(Self {
             formatter,
             options,
             topic,
             qos,
+            channel_capacity: config.channel_capacity,
         })
     }
 }
@@ -83,7 +90,7 @@ impl<'a> Source<'a, String> for MqttSource {
     async fn connect(self, _offset: Option<Offset>) -> Result<LocalBoxStream<'a, String>> {
         let (client, event_loop) = AsyncClient::new(self.options, MQTT_CLIENT_BUFFER_SIZE);
         client.subscribe(self.topic, self.qos).await?;
-        let (sender, receiver) = channel::bounded(CHANNEL_BUFFER_SIZE);
+        let (sender, receiver) = channel::bounded(self.channel_capacity);
         spawn(mqtt_loop(
             sender,
             receiver.clone(),
@@ -101,7 +108,6 @@ async fn mqtt_loop(
     formatter: Box<dyn Formatter + Sync + Send>,
 ) -> Result<(), MqttConnectorError> {
     let mut last_warn = Instant::now();
-    let mut num_dropped_messages = 0u64;
     loop {
         // eventloop.poll() docs state "Don't block while iterating"
         let notification = match event_loop.poll().await {
@@ -114,42 +120,21 @@ async fn mqtt_loop(
         };
 
         if let Ok(mqtt_event) = MqttEvent::try_from(notification) {
-            if tx.is_full() {
-                num_dropped_messages += 1;
-                let elapsed = last_warn.elapsed();
-                if elapsed > MIN_LOG_WARN_TIME {
-                    warn!("Queue backed up. Dropped {num_dropped_messages} mqtt messages in last {elapsed:?}");
-                    last_warn = Instant::now();
-                    num_dropped_messages = 0;
-                }
-
-                _ = rx.try_recv()
-            }
             let formatted = match formatter.to_string(&mqtt_event) {
                 Ok(s) => s,
                 Err(_) => {
-                    num_dropped_messages += 1;
                     let elapsed = last_warn.elapsed();
                     if elapsed > MIN_LOG_WARN_TIME {
-                        warn!("Failed to format message. Dropped {num_dropped_messages} failed to parse messages in last {elapsed:?}");
+                        warn!("Failed to format MQTT message; skipping");
                         last_warn = Instant::now();
-                        num_dropped_messages = 0;
-                    };
+                    }
                     continue;
                 }
             };
-            match tx.try_send(formatted) {
-                Ok(_) => {}
-                Err(e) => match e {
-                    async_std::channel::TrySendError::Full(_) => {
-                        unreachable!(); // there is only one sender and here we remove a record if
-                                        // full before sending
-                    }
-                    async_std::channel::TrySendError::Closed(_) => {
-                        error!("Channel closed. Finishing mqtt loop");
-                        return Err(MqttConnectorError::ChannelClosed);
-                    }
-                },
+            // Backpressure: await send instead of drop-on-full
+            if let Err(_closed) = tx.send(formatted).await {
+                error!("Channel closed; finishing mqtt loop");
+                return Err(MqttConnectorError::ChannelClosed);
             }
         }
     }

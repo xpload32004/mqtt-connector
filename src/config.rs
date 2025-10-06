@@ -16,6 +16,18 @@ pub(crate) struct MqttConfig {
     pub client_id: String,
     #[serde(default)]
     pub payload_output_type: OutputType,
+
+    /// Bounded channel size between MQTT reader and producer
+    #[serde(default = "default_channel_capacity")]
+    pub channel_capacity: usize,
+
+    /// MQTT in-flight limit (caps broker→client pressure)
+    #[serde(default = "default_inflight")]
+    pub inflight: u16,
+
+    /// Subscription QoS
+    #[serde(default)]
+    pub qos: QosConfig,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -26,10 +38,30 @@ pub(crate) enum OutputType {
     Json,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum QosConfig {
+    AtMostOnce,
+    AtLeastOnce,
+    ExactlyOnce,
+}
+impl Default for QosConfig {
+    fn default() -> Self {
+        QosConfig::AtMostOnce
+    }
+}
+
 fn default_timeout() -> Duration {
     DEFAULT_TIMEOUT_VALUE
 }
 
 fn default_client_id() -> String {
     uuid::Uuid::new_v4().to_string()
+}
+
+fn default_channel_capacity() -> usize {
+    10_000
+}
+fn default_inflight() -> u16 {
+    10
 }
