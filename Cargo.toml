@@ -48,8 +48,8 @@ serde = {version = "1.0", default-features = false }
 rumqttc = { version = "0.24" }
 rustls = { version = "0.22" }
 
-fluvio = { git = "https://github.com/xpload32004/fluvio.git", rev = "2cc2d262d2a99accfe71ab1a34a8d9788d52c91b" }
-fluvio-connector-common = { git = "https://github.com/xpload32004/fluvio.git", rev = "2cc2d262d2a99accfe71ab1a34a8d9788d52c91b", features = ["derive"] }
+fluvio = { git = "https://github.com/xpload32004/fluvio.git", rev = "760887db81acb7baf68c01aa737357dc2337912e" }
+fluvio-connector-common = { git = "https://github.com/xpload32004/fluvio.git", rev = "760887db81acb7baf68c01aa737357dc2337912e", features = ["derive"] }
 fluvio-future = { version = "0.7.2", default-features = false }
 
 # Use our Fluvio fork which applies `meta.producer.max-request-size` when building a producer.
