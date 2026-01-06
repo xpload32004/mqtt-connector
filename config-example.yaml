@@ -4,6 +4,9 @@ meta:
   type: mqtt-source
   topic: mqtt-topic
   create-topic: true
+  producer:
+    max-request-size: 10240000
+    batch-size: 10240000
 mqtt:  
   url: "mqtt://test.mosquitto.org/"  
   topic: "mqtt-to-fluvio"
@@ -12,4 +15,3 @@ mqtt:
     secs: 30
     nanos: 0
   payload_output_type: json
-

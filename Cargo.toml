@@ -48,9 +48,13 @@ serde = {version = "1.0", default-features = false }
 rumqttc = { version = "0.24" }
 rustls = { version = "0.22" }
 
-fluvio = { git = "https://github.com/infinyon/fluvio", tag = "v0.17.3" }
-fluvio-connector-common = { git = "https://github.com/infinyon/fluvio", tag = "v0.17.3", features = ["derive"] }
+fluvio = { git = "https://github.com/xpload32004/fluvio.git", rev = "2cc2d262d2a99accfe71ab1a34a8d9788d52c91b" }
+fluvio-connector-common = { git = "https://github.com/xpload32004/fluvio.git", rev = "2cc2d262d2a99accfe71ab1a34a8d9788d52c91b", features = ["derive"] }
 fluvio-future = { version = "0.7.2", default-features = false }
+
+# Use our Fluvio fork which applies `meta.producer.max-request-size` when building a producer.
+# This is required to prevent the connector from crash-looping when processing >1MiB MQTT payloads.
+# Keep the fork pinned so Docker builds are reproducible.
 
 # transitive version selection
 bytes = { version = "1.8.0" }
